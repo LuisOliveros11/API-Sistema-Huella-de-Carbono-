@@ -6,6 +6,7 @@ const prisma = new PrismaClient();
 const validator = require('validator');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { authenticateToken } = require('./authMiddleware');
 
 app.use(express.json())
 
@@ -125,7 +126,7 @@ app.post("/crearUsuario", async (req, res) => {
     }
 });
 
-app.put("/usuario/:id", async (req, res) => {
+app.put("/usuario/:id", authenticateToken, async (req, res) => {
     const { id } = req.params
     const { nombre, correo, contrasena } = req.body
 
