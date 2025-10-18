@@ -5,6 +5,7 @@ const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 const validator = require('validator');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 app.use(express.json())
 
@@ -14,6 +15,50 @@ app.get("/", (req, res) => {
 });
 
 // ENDPOINTS USUARIOS
+
+//Iniciar sesion usuario
+app.post("/iniciarSesion", async (req, res) => {
+    try {
+        const { correo, contrasena } = req.body;
+
+        //Validar que se haya enviado email y password
+        if (!correo || !contrasena) {
+            return res.status(400).json({ message: "Error. Debes enviar correo y contraseña." });
+        }
+
+        //Buscar al usuario por email
+        const correoNormalizado = correo.trim().toLowerCase();
+        const user = await prisma.user.findUnique({ where: { correo: correoNormalizado } });
+        if (!user) {
+            return res.status(401).json({ message: "Error. Usuario o contraseña incorrectos." });
+        }
+
+        //Verificar que la contraseña encriptada coincida
+        const passwordMatch = await bcrypt.compare(contrasena, user.contrasena);
+        if (!passwordMatch) {
+            return res.status(401).json({ message: "Error. Usuario o contraseña incorrectos." });
+        }
+
+        const payload = {
+            id: user.id,
+            correo: user.correo,
+            nombre: user.nombre,
+        };
+
+        // Generar el token usando la variable secreto
+        const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+        res.status(200).json({
+            message: "Inicio de sesión exitoso.",
+            token,
+        });
+    } catch (error) {
+        console.error("Error en el login:", error);
+        res.status(500).json({ message: "Error interno del servidor." });
+    }
+});
+
+
 app.get("/usuarios", async (req, res) => {
     const usuarios = await prisma.user.findMany()
     res.json(usuarios)
