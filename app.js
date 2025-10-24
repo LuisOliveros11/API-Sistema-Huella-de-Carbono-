@@ -7,6 +7,7 @@ const validator = require('validator');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { authenticateToken } = require('./authMiddleware');
+const { calcularHuellaAlimentos } = require('./services/calcularHuellaCarbono.js');
 
 app.use(express.json())
 
@@ -172,7 +173,7 @@ app.put("/usuario/:id", authenticateToken, async (req, res) => {
 
             updatedData.correo = correoNormalizado;
         }
-        
+
         if (contrasena) {
             if (!validator.isStrongPassword(contrasena, {
                 minLength: 8,
@@ -214,6 +215,28 @@ app.delete("/usuario/:id", async (req, res) => {
     res.json("Eliminado correctamente")
 });
 
-app.listen(3000, () => {
+// ENDPOINTS CALCULOS
+app.post('/calcularHuellaAlimentos', (req, res) => {
+    try {
+        const { user_id, responses } = req.body;
+
+        if (!responses || !Array.isArray(responses)) {
+            return res.status(400).json({ error: 'Formato inválido: "responses" debe ser un array' });
+        }
+
+        const result = calcularHuellaAlimentos(responses);
+        console.log('[SERVER] resultado:', result);
+        
+        return res.json({
+            user_id: user_id || null,
+            ...result
+        });
+    } catch (err) {
+        console.error('Error en /calculate:', err);
+        return res.status(500).json({ error: 'Error interno en cálculo' });
+    }
+});
+
+app.listen(3000, "0.0.0.0", () => {
     console.log("Servidor corriendo en http://localhost:3000")
 }); 
