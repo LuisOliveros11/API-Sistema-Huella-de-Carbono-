@@ -18,6 +18,8 @@ model User {
   nombre String @db.VarChar(255) 
   correo String @unique @db.VarChar(255)
   contrasena String @db.VarChar(255)
+
+  respuestas Respuesta[]
 }
 
 model Pregunta {
@@ -25,4 +27,20 @@ model Pregunta {
   codigo String @unique @db.VarChar(255) 
   texto String @db.Text 
   categoria String @db.VarChar(255)
+
+  respuestas Respuesta[]
+}
+
+model Respuesta {
+  id  Int @id @default(autoincrement())
+  usuarioId Int
+  preguntaId Int
+  valor Decimal @db.Decimal(10,4)  
+  createdAt DateTime @default(now())
+
+  usuario    User      @relation(fields: [usuarioId], references: [id])
+  pregunta   Pregunta  @relation(fields: [preguntaId], references: [id])
+
+  // evitar duplicados usuario+pregunta
+  @@unique([usuarioId, preguntaId])
 }
