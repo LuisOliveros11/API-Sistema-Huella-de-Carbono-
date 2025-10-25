@@ -24,6 +24,5 @@ model Pregunta {
   id Int @id @default(autoincrement())
   codigo String @unique @db.VarChar(255) 
   texto String @db.Text 
-  unidadMedida String @db.VarChar(255)
   categoria String @db.VarChar(255)
 }
