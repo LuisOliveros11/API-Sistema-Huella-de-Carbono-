@@ -215,7 +215,7 @@ app.delete("/usuario/:id", async (req, res) => {
 });
 
 // ENDPOINTS CALCULOS
-app.post('/calcularHuellaAlimentos', async(req, res) => {
+app.post('/calcularHuellaAlimentos', async (req, res) => {
     try {
         const { user_id, responses } = req.body;
 
@@ -229,8 +229,9 @@ app.post('/calcularHuellaAlimentos', async(req, res) => {
 
         // 2) Si hay user_id, intentamos guardar las respuestas en la tabla Respuesta
         const saved = [];
-        const skipped = []; 
+        const skipped = [];
         const errors = [];
+        const txOps = [];
 
         if (user_id) {
             const userIdNum = Number(user_id);
@@ -239,8 +240,6 @@ app.post('/calcularHuellaAlimentos', async(req, res) => {
             }
 
             // Construimos operaciones upsert para la transacción
-            const respuestasNuevas = [];
-
             for (const r of responses) {
                 if (!r || !r.code) {
                     skipped.push({ reason: 'No se encontró código valido para la pregunta', item: r });
@@ -250,6 +249,11 @@ app.post('/calcularHuellaAlimentos', async(req, res) => {
                 const pregunta = await prisma.pregunta.findUnique({
                     where: { codigo: r.code }
                 });
+
+                if (!pregunta) {
+                    skipped.push(r.code);
+                    continue;
+                }
 
                 const preguntaId = pregunta.id;
                 if (!preguntaId) {
@@ -261,7 +265,7 @@ app.post('/calcularHuellaAlimentos', async(req, res) => {
                     ? '0'
                     : String(r.value);
 
-                respuestasNuevas.push(
+                txOps.push(
                     prisma.respuesta.upsert({
                         where: {
                             usuarioId_preguntaId: { usuarioId: userIdNum, preguntaId: preguntaId }
@@ -279,13 +283,37 @@ app.post('/calcularHuellaAlimentos', async(req, res) => {
                 saved.push(r.code);
             }
 
-            if (respuestasNuevas.length > 0) {
-                try {
-                    await prisma.$transaction(respuestasNuevas);
-                } catch (dbErr) {
-                    console.error('[SERVER] Error guardando respuestas:', dbErr);
-                    errors.push(String(dbErr));
-                }
+            txOps.push(
+                prisma.emisionCategoria.upsert({
+                    where: { usuarioId_categoria: { usuarioId: userIdNum, categoria: "Alimentos" } },
+                    update: { totalEmisiones: String(result.total_kgCO2e) },
+                    create: { usuarioId: userIdNum, categoria: "Alimentos", totalEmisiones: String(result.total_kgCO2e) }
+                })
+            );
+
+            try {
+                const txResults = await prisma.$transaction(txOps);
+                const emisionResult = txResults[txResults.length - 1];
+
+                return res.json({
+                    user_id: userIdNum,
+                    ...result,
+                    saved_count: saved.length,
+                    saved_codes: saved,
+                    skipped_codes: skipped,
+                    db_errors: [],
+                    emision_categoria: emisionResult
+                });
+            } catch (txErr) {
+                console.error('[SERVER] Error en transacción:', txErr);
+                return res.status(500).json({
+                    user_id: userIdNum,
+                    ...result,
+                    saved_count: saved.length,
+                    saved_codes: saved,
+                    skipped_codes: skipped,
+                    db_errors: [String(txErr)]
+                });
             }
         }
 
@@ -310,28 +338,62 @@ app.get("/respuestas", async (req, res) => {
 })
 
 app.get("/respuestas/:usuarioId", async (req, res) => {
-  try {
-    const { usuarioId } = req.params;
+    try {
+        const { usuarioId } = req.params;
 
-    const respuestas = await prisma.respuesta.findMany({
-      where: { usuarioId: Number(usuarioId) },
-      include: {
-        pregunta: true,
-        usuario: { select: { id: true, nombre: true, correo: true } } 
-      },
-      orderBy: { createdAt: 'desc' } 
-    });
+        const respuestas = await prisma.respuesta.findMany({
+            where: { usuarioId: Number(usuarioId) },
+            include: {
+                pregunta: true,
+                usuario: { select: { id: true, nombre: true, correo: true } }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
 
-    if (respuestas.length === 0) {
-      return res.status(404).json({ message: "No se encontraron respuestas para este usuario." });
+        if (respuestas.length === 0) {
+            return res.status(404).json({ message: "No se encontraron respuestas para este usuario." });
+        }
+
+        res.json(respuestas);
+    } catch (error) {
+        console.error("Error al obtener respuestas:", error);
+        res.status(500).json({ error: "Error interno del servidor." });
     }
-
-    res.json(respuestas);
-  } catch (error) {
-    console.error("Error al obtener respuestas:", error);
-    res.status(500).json({ error: "Error interno del servidor." });
-  }
 });
+
+app.get("/respuestas/:usuarioId/:categoria", async (req, res) => {
+    try {
+        const { usuarioId, categoria } = req.params;
+
+        const respuestas = await prisma.respuesta.findMany({
+            where: {
+                usuarioId: Number(usuarioId),
+                pregunta: { categoria: String(categoria) }
+            },
+            include: {
+                pregunta: true,
+                usuario: { select: { id: true, nombre: true, correo: true } }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        if (respuestas.length === 0) {
+            return res.status(404).json({ message: "No se encontraron respuestas para este usuario y categoría." });
+        }
+
+        res.json(respuestas);
+    } catch (error) {
+        console.error("Error al obtener respuestas:", error);
+        res.status(500).json({ error: "Error interno del servidor." });
+    }
+});
+
+
+// ENDPOINST EMISIONES POR CATEGORIA
+app.get("/emisionesCategoria", async (req, res) => {
+    const totalEmisiones = await prisma.emisionCategoria.findMany()
+    res.json(totalEmisiones)
+})
 
 
 app.listen(3000, "0.0.0.0", () => {
