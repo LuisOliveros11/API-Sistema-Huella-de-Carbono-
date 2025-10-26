@@ -45,7 +45,7 @@ function calcularHuellaAlimentos(responses) {
 
     for (const multCode of CODIGOS_MULTIPLICACION) {
         const respuesta = byCode[multCode];
-        if (!respuesta) continue; 
+        if (!respuesta) continue;
 
         const rawMult = respuesta.value;
         const multiplier = Number(rawMult);
@@ -60,11 +60,16 @@ function calcularHuellaAlimentos(responses) {
             continue;
         }
 
-        sumaTotal = sumaTotal * multiplier;
+        if (multCode === "Alimentos_10") {
+            sumaTotal -= (sumaTotal * multiplier);
+        } else {
+            sumaTotal = sumaTotal * multiplier;
+        }
+
         detalles.push({
             code: multCode,
             multiplier,
-            contribution: Number(sumaTotal.toFixed(4)), 
+            contribution: Number(sumaTotal.toFixed(4)),
             note: `subtotal después de multiplicar x${multiplier}`
         });
     }
