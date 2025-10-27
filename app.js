@@ -8,7 +8,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { authenticateToken } = require('./authMiddleware');
 const { calcularHuellaAlimentos } = require('./services/calcularHuellaAlimentos.js');
-const { calcularHuellaTransporte } = require('./services/calulcarHuellaTransporte.js');
+const { calcularHuellaTransporte } = require('./services/calcularHuellaTransporte.js');
+const { calcularHuellaEstiloVida } = require('./services/calcularHuellaEstiloVida.js');
 
 app.use(express.json())
 
@@ -397,9 +398,6 @@ app.post('/calcularHuellaTransporte', authenticateToken, async (req, res) => {
                     }
                 }
 
-                // DEBUG: ver exactamente qué valor se va a insertar/actualizar
-                console.log(`[DEBUG] preparing upsert for code=${r.code} preguntaId=${preguntaId} valorStr=${valorStr}`);
-
                 txOps.push(
                     prisma.respuesta.upsert({
                         where: {
@@ -424,6 +422,136 @@ app.post('/calcularHuellaTransporte', authenticateToken, async (req, res) => {
                     where: { usuarioId_categoria: { usuarioId: userIdNum, categoria: "Transporte" } },
                     update: { totalEmisiones: String(result.total_kgCO2e) },
                     create: { usuarioId: userIdNum, categoria: "Transporte", totalEmisiones: String(result.total_kgCO2e) }
+                })
+            );
+
+            try {
+                const txResults = await prisma.$transaction(txOps);
+                const emisionResult = txResults[txResults.length - 1];
+
+                return res.json({
+                    user_id: userIdNum,
+                    ...result,
+                    saved_count: saved.length,
+                    saved_codes: saved,
+                    skipped_codes: skipped,
+                    db_errors: [],
+                    emision_categoria: emisionResult
+                });
+            } catch (txErr) {
+                console.error('[SERVER] Error en transacción:', txErr);
+                return res.status(500).json({
+                    user_id: userIdNum,
+                    ...result,
+                    saved_count: saved.length,
+                    saved_codes: saved,
+                    skipped_codes: skipped,
+                    db_errors: [String(txErr)]
+                });
+            }
+        }
+
+        return res.json({
+            user_id: user_id || null,
+            ...result,
+            saved_count: saved.length,
+            saved_codes: saved,
+            skipped_codes: skipped,
+            db_errors: errors
+        });
+    } catch (err) {
+        console.error('Error en /calculate:', err);
+        return res.status(500).json({ error: 'Error interno en cálculo' });
+    }
+});
+
+app.post('/calcularHuellaEstiloVida', authenticateToken, async (req, res) => {
+    try {
+        const { user_id, responses } = req.body;
+
+        if (!responses || !Array.isArray(responses)) {
+            return res.status(400).json({ error: 'Formato inválido: "responses" debe ser un array' });
+        }
+
+        const result = calcularHuellaEstiloVida(responses);
+
+        console.log('[SERVER] resultado:', result);
+
+        // 2) Si hay user_id, intentamos guardar las respuestas en la tabla Respuesta
+        const saved = [];
+        const skipped = [];
+        const errors = [];
+        const txOps = [];
+
+        if (user_id) {
+            const userIdNum = Number(user_id);
+            if (Number.isNaN(userIdNum)) {
+                return res.status(400).json({ error: 'ERROR. User_id en formato invalido. User_id debe ser numérico' });
+            }
+
+            // Construimos operaciones upsert para la transacción
+            for (const r of responses) {
+                if (!r || !r.code) {
+                    skipped.push({ reason: 'No se encontró código valido para la pregunta', item: r });
+                    continue;
+                }
+
+                const pregunta = await prisma.pregunta.findUnique({
+                    where: { codigo: r.code }
+                });
+
+                if (!pregunta) {
+                    skipped.push(r.code);
+                    continue;
+                }
+
+                const preguntaId = pregunta.id;
+                if (!preguntaId) {
+                    skipped.push(r.code);
+                    continue;
+                }
+
+                let valorStr = '0';
+
+                if (r.value === null || typeof r.value === 'undefined') {
+                    valorStr = '0';
+                } else if (typeof r.value === 'number') {
+                    valorStr = r.value.toString();
+                } else if (typeof r.value === 'string') {
+                    const n = Number(r.value);
+                    valorStr = Number.isNaN(n) ? r.value : n.toString();
+                } else {
+                    try {
+                        valorStr = String(r.value);
+                    } catch (e) {
+                        valorStr = '0';
+                    }
+                }
+
+                txOps.push(
+                    prisma.respuesta.upsert({
+                        where: {
+                            usuarioId_preguntaId: { usuarioId: userIdNum, preguntaId: preguntaId }
+                        },
+                        update: {
+                            valor: valorStr
+                        },
+                        create: {
+                            usuarioId: userIdNum,
+                            preguntaId: preguntaId,
+                            valor: valorStr
+                        }
+                    })
+                );
+
+                saved.push(r.code);
+            }
+
+            txOps.push(
+                prisma.emisionCategoria.upsert({
+                    where: { usuarioId_categoria: { usuarioId: userIdNum, categoria: "EstiloVida" } },
+                    update: { totalEmisiones: String(result.total_kgCO2e) },
+                    create: { usuarioId: userIdNum, categoria: "EstiloVida", totalEmisiones: String(result.total_kgCO2e) }
                 })
             );
 
