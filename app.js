@@ -595,13 +595,65 @@ app.post('/calcularHuellaEstiloVida', authenticateToken, async (req, res) => {
     }
 });
 
+app.get('/obtenerHuellaCarbono/:userIdNum', authenticateToken, async (req, res) => {
+    try {
+        const { userIdNum } = req.params;
+        if (!userIdNum || Number.isNaN(userIdNum)) {
+            return res.status(400).json({ error: 'user_id inválido o no proporcionado' });
+        }
+
+        const categorias = ['Alimentos', 'Transporte', 'EstiloVida'];
+
+        const results = await prisma.emisionCategoria.findMany({
+            where: {
+                usuarioId: Number(userIdNum),
+                categoria: { in: categorias }
+            }
+        });
+
+        const readTotal = (row) => {
+            if (!row) return 0;
+            const raw = row.totalEmisiones;
+
+            if (raw && typeof raw.toString === 'function') {
+                const n = Number(raw.toString());
+                return Number.isNaN(n) ? 0 : n;
+            }
+            const n = Number(raw);
+            return Number.isNaN(n) ? 0 : n;
+        };
+
+        let total = 0;
+        const breakdown = categorias.map(cat => {
+            const row = results.find(r => r.categoria === cat);
+            const val = readTotal(row);
+            total += val;
+            return {
+                categoria: cat,
+                total_kgCO2e: Number(val.toFixed(4)),
+                emisionCategoriaRecordId: row?.id ?? null,
+                updatedAt: row?.updatedAt ?? null
+            };
+        });
+
+        return res.json({
+            user_id: userIdNum,
+            total_kgCO2e: Number(total.toFixed(2)),
+            breakdown
+        });
+    } catch (err) {
+        console.error('Error en /calcularHuellaCarbono:', err);
+        return res.status(500).json({ error: 'Error interno al calcular huella total' });
+    }
+});
+
 // ENDPOINTS RESPUESTAS
 app.get("/respuestas", authenticateToken, async (req, res) => {
     const respuestas = await prisma.respuesta.findMany()
     res.json(respuestas)
 })
 
-app.get("/respuestas/:usuarioId", authenticateToken,  async (req, res) => {
+app.get("/respuestas/:usuarioId", authenticateToken, async (req, res) => {
     try {
         const { usuarioId } = req.params;
 
@@ -658,6 +710,29 @@ app.get("/emisionesCategoria", authenticateToken, async (req, res) => {
     const totalEmisiones = await prisma.emisionCategoria.findMany()
     res.json(totalEmisiones)
 })
+
+app.get("/emisionesCategoria/:usuarioId", authenticateToken, async (req, res) => {
+    try {
+        const { usuarioId } = req.params;
+
+        const respuestas = await prisma.emisionCategoria.findMany({
+            where: { usuarioId: Number(usuarioId) },
+            include: {
+                usuario: { select: { id: true, nombre: true, correo: true } }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        if (respuestas.length === 0) {
+            return res.status(404).json({ message: "No se encontraron respuestas para este usuario." });
+        }
+
+        res.json(respuestas);
+    } catch (error) {
+        console.error("Error al obtener respuestas:", error);
+        res.status(500).json({ error: "Error interno del servidor." });
+    }
+});
 
 
 app.listen(3000, "0.0.0.0", () => {

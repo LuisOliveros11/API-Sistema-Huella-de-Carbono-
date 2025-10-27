@@ -21,6 +21,7 @@ model User {
 
   respuestas        Respuesta[]
   emisionCategorias EmisionCategoria[]
+  huellaCarbono HuellaCarbono[]
 }
 
 model Pregunta {
@@ -57,4 +58,12 @@ model EmisionCategoria {
   usuario User @relation(fields: [usuarioId], references: [id])
 
   @@unique([usuarioId, categoria])
+}
+
+model HuellaCarbono {
+  id             Int      @id @default(autoincrement())
+  usuarioId      Int
+  emisionesTotales Decimal  @db.Decimal(10, 4)
+
+  usuario User @relation(fields: [usuarioId], references: [id])
 }
