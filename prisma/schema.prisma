@@ -67,3 +67,15 @@ model HuellaCarbono {
 
   usuario User @relation(fields: [usuarioId], references: [id])
 }
+
+model Recomendacion {
+  id             Int      @id @default(autoincrement())
+  titulo         String   @db.VarChar(255)
+  descripcion    String   @db.Text
+  categoria      String   @db.VarChar(255)
+  dificultad     String   @db.VarChar(255)
+  preguntaCodigo String?  @db.VarChar(255)   
+  limite         Decimal? @db.Decimal(10,4) 
+  operador       String?  @db.VarChar(10)  
+  activo         Boolean  @default(true)
+}
