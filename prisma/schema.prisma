@@ -19,9 +19,10 @@ model User {
   correo     String @unique @db.VarChar(255)
   contrasena String @db.VarChar(255)
 
-  respuestas        Respuesta[]
-  emisionCategorias EmisionCategoria[]
-  huellaCarbono HuellaCarbono[]
+  respuestas           Respuesta[]
+  emisionCategorias    EmisionCategoria[]
+  huellaCarbono        HuellaCarbono[]
+  recomendacionUsuario RecomendacionUsuario[]
 }
 
 model Pregunta {
@@ -61,9 +62,9 @@ model EmisionCategoria {
 }
 
 model HuellaCarbono {
-  id             Int      @id @default(autoincrement())
-  usuarioId      Int
-  emisionesTotales Decimal  @db.Decimal(10, 4)
+  id               Int     @id @default(autoincrement())
+  usuarioId        Int
+  emisionesTotales Decimal @db.Decimal(10, 4)
 
   usuario User @relation(fields: [usuarioId], references: [id])
 }
@@ -74,8 +75,22 @@ model Recomendacion {
   descripcion    String   @db.Text
   categoria      String   @db.VarChar(255)
   dificultad     String   @db.VarChar(255)
-  preguntaCodigo String?  @db.VarChar(255)   
-  limite         Decimal? @db.Decimal(10,4) 
-  operador       String?  @db.VarChar(10)  
+  preguntaCodigo String?  @db.VarChar(255)
+  limite         Decimal? @db.Decimal(10, 4)
+  operador       String?  @db.VarChar(10)
   activo         Boolean  @default(true)
+
+  recomendacionUsuario RecomendacionUsuario[]
+}
+
+model RecomendacionUsuario {
+  id              Int      @id @default(autoincrement())
+  usuarioId       Int
+  recomendacionId Int
+  createdAt       DateTime @default(now())
+
+  usuario       User          @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  recomendacion Recomendacion @relation(fields: [recomendacionId], references: [id])
+
+  @@unique([usuarioId, recomendacionId])
 }

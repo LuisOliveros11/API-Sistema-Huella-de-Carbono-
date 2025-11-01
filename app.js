@@ -734,6 +734,152 @@ app.get("/emisionesCategoria/:usuarioId", authenticateToken, async (req, res) =>
     }
 });
 
+// ENDPOINTS RECOMENDACIONES
+app.post('/generarRecomendaciones/:usuarioId', authenticateToken, async (req, res) => {
+    try {
+        const usuarioId = Number(req.params.usuarioId);
+        if (!usuarioId || Number.isNaN(usuarioId)) {
+            return res.status(400).json({ error: 'usuarioId inválido' });
+        }
+
+        const respuestas = await prisma.respuesta.findMany({
+            where: { usuarioId },
+            include: { pregunta: true }
+        });
+
+        const respuestasByCode = {};
+        for (const r of respuestas) {
+            const raw = r.valor;
+            let val = null;
+            try {
+                val = raw && typeof raw.toString === 'function' ? Number(raw.toString()) : Number(raw);
+                if (Number.isNaN(val)) val = null;
+            } catch (e) {
+                val = null;
+            }
+            respuestasByCode[r.pregunta.codigo] = val;
+        }
+
+        const recomendaciones = await prisma.recomendacion.findMany({
+            where: { activo: true, NOT: { preguntaCodigo: null } }
+        });
+
+        function testOperator(left, operador, right) {
+            if (left === null || left === undefined) return false;
+            if (right === null || right === undefined) return false;
+            const ln = Number(left);
+            const rn = Number(right);
+            const bothNumber = !Number.isNaN(ln) && !Number.isNaN(rn);
+
+            switch ((operador || '>=').trim()) {
+                case '>=': return bothNumber ? ln >= rn : String(left) >= String(right);
+                case '<=': return bothNumber ? ln <= rn : String(left) <= String(right);
+                case '>': return bothNumber ? ln > rn : String(left) > String(right);
+                case '<': return bothNumber ? ln < rn : String(left) < String(right);
+                case '==':
+                case '=': return bothNumber ? ln === rn : String(left) === String(right);
+                default: return bothNumber ? ln >= rn : String(left) === String(right);
+            }
+        }
+
+        const toInsert = [];
+        const matched = [];
+        const skipped = [];
+
+        for (const rec of recomendaciones) {
+            const code = rec.preguntaCodigo;
+            if (!code) continue;
+
+            const leftValue = respuestasByCode[code];
+            if (typeof leftValue === 'undefined' || leftValue === null) {
+                skipped.push({ recomendacionId: rec.id, preguntaCodigo: code, reason: 'sin respuesta del usuario' });
+                continue;
+            }
+
+            const limiteRaw = rec.limite == null ? null : (typeof rec.limite.toString === 'function' ? rec.limite.toString() : String(rec.limite));
+            if (limiteRaw === null) {
+                skipped.push({ recomendacionId: rec.id, preguntaCodigo: code, reason: 'sin limite en recomendacion' });
+                continue;
+            }
+            const limiteNum = Number(limiteRaw);
+            const right = Number.isNaN(limiteNum) ? limiteRaw : limiteNum;
+
+            const ok = testOperator(leftValue, rec.operador || '>=', right);
+            if (ok) {
+                matched.push({ recomendacionId: rec.id, titulo: rec.titulo, preguntaCodigo: code, leftValue, limite: right, operador: rec.operador || '>=' });
+                toInsert.push({ usuarioId, recomendacionId: rec.id });
+            } else {
+                skipped.push({ recomendacionId: rec.id, preguntaCodigo: code, leftValue, limite: right, operador: rec.operador || '>=', reason: 'no cumple' });
+            }
+        }
+
+        let insertResult = { count: 0 };
+        if (toInsert.length > 0) {
+            insertResult = await prisma.recomendacionUsuario.createMany({
+                data: toInsert,
+                skipDuplicates: true
+            });
+        }
+
+        return res.json({
+            user_id: usuarioId,
+            matched_count: matched.length,
+            assigned_count: insertResult.count ?? 0,
+            matched,
+            skipped
+        });
+    } catch (err) {
+        console.error('Error en /generarRecomendacionesSimple:', err);
+        return res.status(500).json({ error: 'Error interno generando recomendaciones' });
+    }
+});
+
+app.get('/recomendacionesUsuario/:usuarioId', authenticateToken, async (req, res) => {
+    try {
+        const { usuarioId } = req.params;
+        const idNum = Number(usuarioId);
+        if (!usuarioId || Number.isNaN(idNum)) {
+            return res.status(400).json({ error: 'usuarioId inválido o no proporcionado' });
+        }
+
+        const rows = await prisma.recomendacionUsuario.findMany({
+            where: { usuarioId: idNum },
+            include: {
+                recomendacion: true 
+            },
+            orderBy: { id: 'desc' } 
+        });
+
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ message: 'No se encontraron recomendaciones asignadas a este usuario.' });
+        }
+
+        const recomendaciones = rows.map(r => ({
+            asignacionId: r.id,
+            usuarioId: r.usuarioId,
+            recomendacionId: r.recomendacionId,
+            fechaAsignada: r.createdAt ?? null, 
+            recomendacion: {
+                id: r.recomendacion.id,
+                titulo: r.recomendacion.titulo,
+                descripcion: r.recomendacion.descripcion,
+                categoria: r.recomendacion.categoria,
+                dificultad: r.recomendacion.dificultad,
+                preguntaCodigo: r.recomendacion.preguntaCodigo,
+                limite: r.recomendacion.limite ? r.recomendacion.limite.toString() : null,
+                operador: r.recomendacion.operador,
+                activo: r.recomendacion.activo,
+            }
+        }));
+
+        return res.json({ count: recomendaciones.length, recomendaciones });
+    } catch (err) {
+        console.error('Error obteniendo recomendacionesUsuario:', err);
+        return res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+
 
 app.listen(3000, "0.0.0.0", () => {
     console.log("Servidor corriendo en http://localhost:3000")
